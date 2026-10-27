@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent 工具调用 · 会使用工具的 AI 助手</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">🔧</div>
+      <div>
+        <h1>Agent 工具调用</h1>
+        <p>会思考、会动手的 AI 助手 —— 计算、查时间、读写文件、抓网页</p>
+      </div>
+    </div>
+    <div class="health" id="health">连接中…</div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel">
+      <h2>可用工具</h2>
+      <ul class="tools" id="tools"><li class="loading">加载中…</li></ul>
+      <h2 class="mt">试试这样问</h2>
+      <ul class="examples" id="examples">
+        <li>现在几点了？</li>
+        <li>帮我算一下 1234 * 56</li>
+        <li>看看工作目录里有什么文件</li>
+        <li>把「你好世界」写进 hello.txt</li>
+        <li>抓一下 https://example.com 的文本</li>
+      </ul>
+      <h2 class="mt">最近记录</h2>
+      <ul class="logs" id="logs"><li class="loading">加载中…</li></ul>
+      <p class="muted">
+        每一步的工具调用都会显示在回答下方 —— 这就是 Agent 的「思考过程」。
+      </p>
+    </aside>
+
+    <section class="chat-panel">
+      <div class="chat-list" id="chat-list">
+        <div class="row assistant">
+          <div class="bubble assistant">
+            你好，我是会使用工具的 AI 助手。试试让我算个数，或者读一下工作目录里的文件吧。
+          </div>
+        </div>
+      </div>
+
+      <div class="composer">
+        <textarea id="message" rows="2"
+          placeholder="描述你的任务，例如：算一下 1234*56，把结果写进 result.txt，再读出来给我看"></textarea>
+        <button id="send">发送</button>
+      </div>
+      <div class="status" id="status"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

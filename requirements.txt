@@ -1,0 +1,10 @@
+# 核心依赖（纯 Python，安装快）
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+openai>=1.40,<3.0
+httpx>=0.27
+python-dotenv>=1.0
+pymysql>=1.1          # 可选：调用记录写入 MySQL
+
+# 测试
+pytest>=8.0

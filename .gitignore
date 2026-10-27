@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 密钥
+.env
+
+# Agent 工作时生成的文件（示例文件除外）
+data/workspace/*
+!data/workspace/.gitkeep
+!data/workspace/notes.md
+
+# 调用记录（JSONL 降级模式生成；用 MySQL 时不生成）
+data/logs.jsonl
+
+# 工具
+.pytest_cache/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
