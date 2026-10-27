@@ -142,7 +142,6 @@ agent-toolkit/
 ├── data/logs.jsonl    # Fallback call log when no database is configured
 ├── tests/             # Three test layers: tools / agent / API
 ├── scripts/smoke.py   # Real-model smoke test
-├── docs/LEARNING.md   # Learning notes + interview questions
 └── .github/workflows/ci.yml
 ```
 
@@ -152,7 +151,7 @@ agent-toolkit/
 python -m pytest -q
 ```
 
-Tests `monkeypatch` the model with a scripted fake, so they need **no API key, no network, no money**. Coverage:
+Tests inject a scripted fake model via `monkeypatch`, so they need **no API key and no network**. Coverage:
 
 - Calculator: normal / malicious / division-by-zero inputs
 - File sandbox and path-traversal blocking
@@ -160,7 +159,7 @@ Tests `monkeypatch` the model with a scripted fake, so they need **no API key, n
 - API health check, tool list, chat, parameter validation, model-error mapping
 - Call log: both MySQL and JSONL backends (the MySQL integration test is skipped when no database is available)
 
-## Design decisions (interview talking points)
+## Design decisions
 
 1. **Why not `eval`**: model output is untrusted — `__import__('os').system('rm -rf /')` would delete everything. Hence `ast` parsing + an operator whitelist.
 2. **Why a sandbox**: file tools may only touch `data/workspace`; `Path.resolve()` checks whether the final path escapes, blocking `../` traversal.
@@ -178,14 +177,14 @@ Tests `monkeypatch` the model with a scripted fake, so they need **no API key, n
 - [ ] Human-approval mode (confirm before writing/deleting files)
 - [ ] Integrate the MCP protocol to reuse community tools
 
-## Learning path
+## Code reading order
 
-From "I don't know what an Agent is" to "I can explain how function calling works":
+A suggested reading order:
 
 1. Run `python scripts/smoke.py` and watch which tools it calls (`data/workspace/calc.md` is created);
 2. Read `app/tools.py`: each tool is just a plain function + a JSON Schema;
-3. Read `run_agent` in `app/agent.py`: the heart of the Agent, under 60 lines;
-4. Answer the interview questions in `docs/LEARNING.md` yourself;
+3. Read `run_agent` in `app/agent.py`: the Agent main loop, under 60 lines;
+4. Read `app/main.py` and `app/recorder.py`: HTTP endpoints and call recording;
 5. Add a new tool (e.g. `random_number`), then run the tests and the UI.
 
 ## License

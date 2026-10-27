@@ -140,7 +140,6 @@ agent-toolkit/
 ├── data/logs.jsonl    # 未配数据库时的调用记录降级文件
 ├── tests/             # 工具 / Agent / API 三层测试
 ├── scripts/smoke.py   # 真实模型冒烟测试
-├── docs/LEARNING.md   # 学习笔记 + 面试题
 └── .github/workflows/ci.yml
 ```
 
@@ -150,7 +149,7 @@ agent-toolkit/
 python -m pytest -q
 ```
 
-测试用 `monkeypatch` 把模型换成脚本化假模型，**不需要 API Key、不联网、不花钱**，覆盖：
+测试通过 `monkeypatch` 注入脚本化假模型，**不需要 API Key 与网络**，覆盖：
 
 - 计算器的正常/恶意/除零输入
 - 文件沙箱与路径穿越拦截
@@ -158,7 +157,7 @@ python -m pytest -q
 - API 的健康检查、工具列表、对话、参数校验、模型错误映射
 - 调用记录的 MySQL / JSONL 两种后端（MySQL 集成测试在没有数据库时自动跳过）
 
-## 设计要点（面试可讲）
+## 设计要点
 
 1. **为什么不用 `eval`**：模型输出不可信，如果直接 `eval`，一句 `__import__('os').system('rm -rf /')` 就能删库。所以用 `ast` 解析 + 白名单运算符。
 2. **为什么要沙箱**：文件工具只能访问 `data/workspace`，用 `Path.resolve()` 判断最终路径是否越界，防止 `../` 逃逸。
@@ -176,15 +175,15 @@ python -m pytest -q
 - [ ] 人工审批模式（写文件/删文件前先确认）
 - [ ] 接入 MCP 协议，复用社区工具
 
-## 学习曲线
+## 代码阅读顺序
 
-从「不知道 Agent 是什么」到「能讲清楚 function calling 原理」，推荐顺序：
+想快速理解代码，推荐按这个顺序：
 
-1. 先跑通 `python scripts/smoke.py`，观察它调了哪些工具（`data/workspace/calc.md` 会生成文件）；
+1. 先跑通 `python scripts/smoke.py`，观察它调用了哪些工具（`data/workspace/calc.md` 会生成文件）；
 2. 读 `app/tools.py`：每个工具就是一个普通函数 + 一份 JSON Schema；
-3. 读 `app/agent.py` 的 `run_agent`：这就是 Agent 的心脏，不到 60 行；
-4. 读 `docs/LEARNING.md` 的面试题，尝试自己回答；
-5. 加一个新工具（比如 `random_number`），跑一遍测试和页面。
+3. 读 `app/agent.py` 的 `run_agent`：Agent 主循环，不到 60 行；
+4. 读 `app/main.py` 与 `app/recorder.py`：HTTP 接口与调用记录；
+5. 尝试新增一个工具（比如 `random_number`），跑一遍测试和页面。
 
 ## License
 
