@@ -453,3 +453,14 @@ body {
     max-height: 200px;
   }
 }
+/* 有序列表跨多个 <ol> 连续编号（模型分节输出时避免每段都从 1 开始） */
+.bubble { counter-reset: bubble-li; }
+.bubble ol { list-style: none; padding-left: 26px; }
+.bubble ol > li { counter-increment: bubble-li; position: relative; }
+.bubble ol > li::before {
+  content: counter(bubble-li) ". ";
+  position: absolute;
+  left: -22px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}

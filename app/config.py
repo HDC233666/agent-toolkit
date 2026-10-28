@@ -21,6 +21,10 @@ DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").r
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "6"))
 
+# ===== 限流 =====
+# 每个 IP 每分钟最多 RATE_LIMIT_PER_MIN 个 /api 请求（health 除外）；0 = 关闭
+RATE_LIMIT_PER_MIN = int(os.getenv("AGENT_RATE_LIMIT", "60"))
+
 # ===== 调用记录存储（可选）=====
 # 留空 = 写 data/logs.jsonl（默认，零配置）；填了 = 写 MySQL，连不上自动降级
 AGENT_DB_HOST = os.getenv("AGENT_DB_HOST", "").strip()
