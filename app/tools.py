@@ -16,6 +16,7 @@ from pathlib import Path
 import httpx
 
 from .config import WORKSPACE
+from .sql_tool import sql_query
 
 _MAX_FILE_CHARS = 200_000
 _MAX_HTTP_CHARS = 20_000
@@ -214,6 +215,32 @@ TOOL_SCHEMAS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "sql_query",
+            "description": (
+                "对本机 MySQL 数据库执行【只读】查询（SELECT/SHOW/DESCRIBE/EXPLAIN/WITH）。"
+                "连接的示例库是 RAG 知识库 rag_kb（表 documents、chunks）。适合统计、筛选、验证数据。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sql": {
+                        "type": "string",
+                        "description": "单条只读 SQL，例如 SELECT COUNT(*) AS n FROM documents",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "description": "最多返回多少行，默认 50",
+                    },
+                },
+                "required": ["sql"],
+            },
+        },
+    },
 ]
 
 TOOL_FUNCS = {
@@ -223,6 +250,7 @@ TOOL_FUNCS = {
     "read_file": read_file,
     "write_file": write_file,
     "http_get": http_get,
+    "sql_query": sql_query,
 }
 
 

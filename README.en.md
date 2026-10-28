@@ -14,6 +14,8 @@ A hand-written **AI Agent** mini-project: the LLM decides on its own when to che
 - 🗂️ **Call logging**: every conversation and tool call is persisted to MySQL (`agent_runs` / `tool_calls`); the UI shows a "Recent runs" panel. Without a database it falls back to local JSONL, so tests and demos never break.
 - ✅ **Testable**: tests run without a real model or network; GitHub Actions runs them automatically
 
+![Screenshot](docs/screenshots/chat.png)
+
 ## Quick start
 
 ```bash
@@ -56,7 +58,8 @@ User question
 │ Tool executor               │
 │ calculator / now /          │
 │ list_files / read_file /    │
-│ write_file / http_get       │
+│ write_file / http_get /     │
+│ sql_query                   │
 └──────────┬──────────────────┘
            │ observation (JSON)
            ▼
@@ -71,6 +74,8 @@ User question
 
 - **Plain chat**: the model replies with text directly.
 - **Agent**: the model may "call tools multiple times"; the program executes each call and feeds the result back until the task is done.
+- **Parallel calls**: one model turn can request several tools at once — they run in a thread pool (up to 4 workers) and the observations are appended in the original order.
+- **Read-only SQL**: `sql_query` talks to MySQL through the same `pymysql` connection settings as the call log; if no `SQL_DB_*` is configured it returns a friendly hint instead of failing.
 
 ## Built-in tools
 
@@ -82,6 +87,7 @@ User question
 | `read_file` | Read a text file in the workspace | Path traversal rejected |
 | `write_file` | Write a file in the workspace | Path sandbox + 200K character limit |
 | `http_get` | Fetch a web page as text | http(s) only, 8 s timeout, truncated to 20K chars |
+| `sql_query` | Read-only SQL against MySQL (`rag_kb`) | SELECT/SHOW/DESC/EXPLAIN/WITH only, single statement, no comments, LIMIT ≤ 200 |
 
 ## API
 
@@ -134,7 +140,8 @@ agent-toolkit/
 │   ├── main.py        # FastAPI entry (chat API, tool list, static page)
 │   ├── agent.py       # Agent loop: model decision + tool execution + result feedback
 │   ├── llm.py         # DeepSeek client wrapper (retries, tool_calls normalization)
-│   ├── tools.py       # 6 tools + JSON Schema specs
+│   ├── tools.py       # 7 tools + JSON Schema specs
+│   ├── sql_tool.py    # Read-only MySQL query tool (validation + pymysql)
 │   ├── recorder.py    # Call logging: MySQL, with JSONL fallback
 │   └── config.py      # Environment configuration (including DB connection)
 ├── static/            # Chat UI (vanilla HTML/CSS/JS, no build step)

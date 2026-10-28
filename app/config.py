@@ -28,3 +28,12 @@ AGENT_DB_PORT = int(os.getenv("AGENT_DB_PORT", "3306"))
 AGENT_DB_USER = os.getenv("AGENT_DB_USER", "root").strip()
 AGENT_DB_PASSWORD = os.getenv("AGENT_DB_PASSWORD", "")
 AGENT_DB_NAME = os.getenv("AGENT_DB_NAME", "agent_toolkit").strip()
+
+# ===== SQL 查询工具的数据源（可选）=====
+# 留空 = sql_query 工具不可用（会明确报错）；填了 = Agent 可对指定库做只读查询
+# 推荐指向 rag-knowledge-base 的 rag_kb 库，两个项目就串起来了
+SQL_DB_HOST = os.getenv("SQL_DB_HOST", "").strip()
+SQL_DB_PORT = int(os.getenv("SQL_DB_PORT", "3306"))
+SQL_DB_USER = os.getenv("SQL_DB_USER", "root").strip()
+SQL_DB_PASSWORD = os.getenv("SQL_DB_PASSWORD", "")
+SQL_DB_NAME = os.getenv("SQL_DB_NAME", "rag_kb").strip()

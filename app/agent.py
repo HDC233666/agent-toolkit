@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 from .config import AGENT_MAX_STEPS
 from .llm import chat_with_tools
@@ -22,14 +23,28 @@ SYSTEM_PROMPT = """你是一个会使用工具的 AI 助手，帮助用户完成
 - read_file：读取工作目录里的文本文件
 - write_file：把文本写入工作目录（生成笔记、报告）
 - http_get：抓取网页文本
+- sql_query：对 MySQL 示例库 rag_kb 做只读查询（统计、筛选、验证数据）
 
 规则：
-1. 能用工具就别猜：算数用 calculator，时间用 now，读文件用 read_file。
-2. 一次只调一个工具，看到结果再决定下一步。
+1. 能用工具就别猜：算数用 calculator，时间用 now，读文件用 read_file，查数据用 sql_query。
+2. 一次可以返回多个工具调用：互不依赖的调用（比如同时查时间和算数）请一次给出，程序会并行执行；有依赖就一步一步来。
 3. 工具返回 {"ok": false, ...} 表示失败：读懂错误，再决定重试还是换方法。
 4. 最终回答用中文，简洁，并说明你用了哪些工具、结果是什么。"""
 
 MAX_HISTORY = 10
+
+
+def _execute_call(call: dict) -> tuple[str, dict, dict]:
+    """解析参数并执行一个工具调用；参数解析失败也返回结构化错误。"""
+    name = str(call["function"]["name"])
+    raw_args = call["function"]["arguments"] or "{}"
+    try:
+        args = json.loads(raw_args)
+        if not isinstance(args, dict):
+            raise ValueError("参数必须是 JSON 对象")
+    except Exception as exc:  # noqa: BLE001
+        return name, {}, {"ok": False, "error": f"参数解析失败：{exc}"}
+    return name, args, run_tool(name, args)
 
 
 def _clean_history(history: list[dict] | None) -> list[dict]:
@@ -81,25 +96,24 @@ def run_agent(
         # 把「模型决定调用工具」这条消息放回对话
         messages.append(message)
 
-        for call in tool_calls:
-            name = call["function"]["name"]
-            raw_args = call["function"]["arguments"] or "{}"
-            try:
-                args = json.loads(raw_args)
-                if not isinstance(args, dict):
-                    raise ValueError("参数必须是 JSON 对象")
-            except Exception as exc:  # noqa: BLE001
-                args = {}
-                observation = {"ok": False, "error": f"参数解析失败：{exc}"}
-            else:
-                observation = run_tool(name, args)
+        # 并行执行：模型一次返回多个 tool_calls 时，互不依赖的调用同时跑（最多 4 个并发）
+        with ThreadPoolExecutor(max_workers=min(len(tool_calls), 4)) as pool:
+            executed = list(pool.map(_execute_call, tool_calls))
 
-            steps.append({"tool": name, "args": args, "result": observation})
+        for call, (name, args, observation) in zip(tool_calls, executed):
+            steps.append(
+                {
+                    "step": len(steps) + 1,
+                    "tool": name,
+                    "args": args,
+                    "result": observation,
+                }
+            )
             messages.append(
                 {
                     "role": "tool",
                     "tool_call_id": call.get("id"),
-                    "content": json.dumps(observation, ensure_ascii=False),
+                    "content": json.dumps(observation, ensure_ascii=False, default=str),
                 }
             )
 

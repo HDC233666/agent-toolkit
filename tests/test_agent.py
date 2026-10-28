@@ -103,6 +103,41 @@ def test_agent_handles_bad_tool_arguments(monkeypatch) -> None:
     assert result["steps"][0]["result"]["ok"] is False
 
 
+def test_agent_runs_multiple_tool_calls_in_parallel(monkeypatch) -> None:
+    """一次返回多个互不依赖的 tool_calls：并行执行、顺序回填、都进入 steps。"""
+    two_calls = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "now", "arguments": "{}"},
+            },
+            {
+                "id": "call_2",
+                "type": "function",
+                "function": {
+                    "name": "calculator",
+                    "arguments": json.dumps({"expression": "2+3"}),
+                },
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        agent,
+        "chat_with_tools",
+        scripted(two_calls, {"role": "assistant", "content": "都完成了"}),
+    )
+
+    result = agent.run_agent("同时告诉我时间和 2+3")
+
+    assert result["answer"] == "都完成了"
+    assert [step["tool"] for step in result["steps"]] == ["now", "calculator"]
+    assert [step["step"] for step in result["steps"]] == [1, 2]
+    assert result["steps"][1]["result"]["result"] == 5
+
+
 def test_agent_rejects_empty_input() -> None:
     with pytest.raises(ValueError):
         agent.run_agent("   ")
