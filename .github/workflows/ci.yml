@@ -21,3 +21,10 @@ jobs:
 
       - name: 运行测试（不需要 API Key）
         run: python -m pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 构建镜像（验证 Dockerfile 可用）
+        run: docker build -t app:ci .
