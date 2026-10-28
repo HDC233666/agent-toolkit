@@ -37,3 +37,10 @@ SQL_DB_PORT = int(os.getenv("SQL_DB_PORT", "3306"))
 SQL_DB_USER = os.getenv("SQL_DB_USER", "root").strip()
 SQL_DB_PASSWORD = os.getenv("SQL_DB_PASSWORD", "")
 SQL_DB_NAME = os.getenv("SQL_DB_NAME", "rag_kb").strip()
+
+# ===== MCP 工具服务器（可选）=====
+# 配置文件里列出的 stdio 工具服务器会在首次调用时自动启动；
+# 设 MCP_ENABLED=0 可整体关闭（本地工具不受影响）
+MCP_ENABLED = os.getenv("MCP_ENABLED", "1").strip() not in ("0", "false", "False")
+MCP_SERVERS_FILE = os.getenv("MCP_SERVERS_FILE", str(BASE_DIR / "data" / "mcp_servers.json"))
+MCP_TIMEOUT_SECONDS = float(os.getenv("MCP_TIMEOUT_SECONDS", "20"))

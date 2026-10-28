@@ -16,10 +16,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import llm
-from .agent import run_agent, run_agent_stream
+from .agent import _all_schemas, run_agent, run_agent_stream
 from .config import DEEPSEEK_API_KEY, DEEPSEEK_MODEL, STATIC_DIR
+from .mcp_tools import get_manager
 from .recorder import make_recorder
-from .tools import TOOL_SCHEMAS
 
 app = FastAPI(title="Agent 工具调用", version="1.0.0")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -49,8 +49,14 @@ def tools() -> list[dict]:
             "name": schema["function"]["name"],
             "description": schema["function"]["description"],
         }
-        for schema in TOOL_SCHEMAS
+        for schema in _all_schemas()
     ]
+
+
+@app.get("/api/mcp/status")
+def mcp_status() -> dict:
+    """MCP 服务器状态：哪些起来了、提供了几个工具、失败的为什么失败。"""
+    return get_manager().status()
 
 
 @app.post("/api/chat")

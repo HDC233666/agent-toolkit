@@ -1,0 +1,14 @@
+{
+  "servers": [
+    {
+      "name": "kb",
+      "command": "python",
+      "args": [
+        "-m",
+        "app.mcp_server"
+      ],
+      "enabled": true,
+      "timeout": 20
+    }
+  ]
+}

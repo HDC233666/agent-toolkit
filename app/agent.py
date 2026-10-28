@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from .config import AGENT_MAX_STEPS
 from .llm import chat_stream_with_tools, chat_with_tools
+from .mcp_tools import get_manager
 from .tools import TOOL_SCHEMAS, run_tool
 
 SYSTEM_PROMPT = """你是一个会使用工具的 AI 助手，帮助用户完成任务。
@@ -29,9 +30,17 @@ SYSTEM_PROMPT = """你是一个会使用工具的 AI 助手，帮助用户完成
 1. 能用工具就别猜：算数用 calculator，时间用 now，读文件用 read_file，查数据用 sql_query。
 2. 一次可以返回多个工具调用：互不依赖的调用（比如同时查时间和算数）请一次给出，程序会并行执行；有依赖就一步一步来。
 3. 工具返回 {"ok": false, ...} 表示失败：读懂错误，再决定重试还是换方法。
-4. 最终回答用中文，简洁，并说明你用了哪些工具、结果是什么。"""
+4. 最终回答用中文，简洁，并说明你用了哪些工具、结果是什么。
+
+另外，工具名以 mcp__ 开头的是外部 MCP 服务器提供的工具（名字形如 mcp__服务器__工具），
+用法和本地工具一样；如果它返回「未就绪 / 未配置」，说明该服务器不可用，换其他方式或如实告诉用户。"""
 
 MAX_HISTORY = 10
+
+
+def _all_schemas() -> list[dict]:
+    """本地工具 + MCP 工具；MCP 服务器起不来时只返回本地工具。"""
+    return list(TOOL_SCHEMAS) + get_manager().schemas()
 
 
 def _execute_call(call: dict) -> tuple[str, dict, dict]:
@@ -84,7 +93,7 @@ def run_agent(
     limit = max(1, max_steps or AGENT_MAX_STEPS)
 
     for _ in range(limit):
-        result = chat_with_tools(messages, TOOL_SCHEMAS)
+        result = chat_with_tools(messages, _all_schemas())
         tokens = tokens or result.get("tokens")
         message = result["message"]
         tool_calls = message.get("tool_calls") or []
@@ -154,7 +163,7 @@ def run_agent_stream(
         tool_calls: list[dict] = []
         content = ""
 
-        for event in chat_stream_with_tools(messages, TOOL_SCHEMAS):
+        for event in chat_stream_with_tools(messages, _all_schemas()):
             if "delta" in event:
                 answer_parts.append(event["delta"])
                 yield {"type": "delta", "text": event["delta"]}

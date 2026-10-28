@@ -12,6 +12,7 @@
 - 📡 **流式输出（SSE）**：工具执行过程和最终回答实时推给前端，回答像打字机一样逐字出现
 - ⚡ **并行工具调用**：模型一次返回多个 `tool_calls` 时用线程池并发执行（属于 Function Calling 进阶用法）
 - 🗄️ **SQL 工具**：`sql_query` 对 MySQL 示例库 `rag_kb` 做**只读**查询（白名单 + 禁写关键字），和 RAG 项目共用同一份数据
+- 🔌 **MCP 工具服务器**：通过 stdio + JSON-RPC 连接外部工具服务器（自带一个 `kb` 服务器，暴露知识库检索/统计）；工具名以 `mcp__` 开头，服务器起不来只跳过、不影响本地工具
 - 🔒 **安全边界**：文件工具被限制在 `data/workspace` 沙箱内，不执行任意代码
 - 🖥️ **可视化**：前端直接展示「思考过程」（每步调了什么、参数、结果），回答支持 Markdown 渲染
 - 🗂️ **调用记录**：每次对话与工具调用落库 MySQL（`agent_runs` / `tool_calls` 两张表），前端展示「最近记录」；没配数据库时自动降级为本地 JSONL，测试照样跑
@@ -89,12 +90,31 @@ python scripts/smoke.py
 | `http_get` | 抓取网页文本 | 只允许 http(s)，8 秒超时，截断 20K 字符 |
 | `sql_query` | 对 MySQL 示例库 `rag_kb` 做只读查询 | 白名单只放行 SELECT/SHOW/DESCRIBE/EXPLAIN/WITH；禁写关键字、限单语句、限 200 行 |
 
+## MCP 工具（外部工具服务器）
+
+`data/mcp_servers.json` 里声明 stdio 服务器，首次使用时会自动拉起：
+
+```json
+{
+  "servers": [
+    { "name": "kb", "command": "python", "args": ["-m", "app.mcp_server"], "enabled": true }
+  ]
+}
+```
+
+- 协议：JSON-RPC 2.0 over stdio，方法只有 `initialize` / `tools/list` / `tools/call` / `ping`（简化版 MCP，便于看清链路）；
+- 工具命名：`mcp__<服务器>__<工具>`，例如 `mcp__kb__kb_search`；
+- 自带 `app/mcp_server.py` 演示服务器，复用 `SQL_DB_*` 连接 RAG 项目的 `rag_kb`，提供 `kb_search`、`kb_stats`；
+- 任何一个服务器启动失败/超时，只记录到 `/api/mcp/status` 的 `errors`，本地工具照常工作；
+- 关闭：`MCP_ENABLED=0`。
+
 ## 接口
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/health` | 健康检查 + 当前模型 |
-| GET | `/api/tools` | 工具列表（前端侧边栏用） |
+| GET | `/api/tools` | 工具列表（本地 + MCP，前端侧边栏用） |
+| GET | `/api/mcp/status` | MCP 服务器状态（工具数、启动错误） |
 | POST | `/api/chat` | `{message, history}` → `{answer, steps, tokens}`（一次性返回） |
 | POST | `/api/chat/stream` | 同上入参，**SSE 流式**：`tool_call` / `tool_result` / `delta` / `done` 事件 |
 | GET | `/api/logs?limit=20` | 最近调用记录 `{storage, totals, runs}` |
@@ -151,13 +171,17 @@ agent-toolkit/
 │   ├── main.py        # FastAPI 入口（对话接口、工具列表、静态页）
 │   ├── agent.py       # Agent 循环：模型决策 + 工具执行 + 结果回灌
 │   ├── llm.py         # DeepSeek 客户端封装（重试、tool_calls 归一化）
-│   ├── tools.py       # 7 个工具 + JSON Schema 说明书
+│   ├── tools.py       # 7 个本地工具 + JSON Schema 说明书（MCP 工具由 mcp_tools 动态合并）
 │   ├── sql_tool.py    # SQL 只读查询工具（白名单校验 + 结果 JSON 化）
 │   ├── recorder.py    # 调用记录：MySQL 落库，失败降级 JSONL
+│   ├── mcp_client.py  # MCP 客户端：stdio 子进程 + JSON-RPC 2.0
+│   ├── mcp_server.py  # 自带的 MCP 工具服务器（kb_search / kb_stats）
+│   ├── mcp_tools.py   # MCP 服务器管理：加载配置、合并 mcp__ 工具、状态上报
 │   └── config.py      # 环境变量配置（含数据库连接）
 ├── static/            # 聊天界面（原生 HTML/CSS/JS，无构建步骤）
 ├── data/workspace/    # 文件工具沙箱（Agent 生成的文件写在这里）
 ├── data/logs.jsonl    # 未配数据库时的调用记录降级文件
+├── data/mcp_servers.json  # MCP 工具服务器清单
 ├── tests/             # 工具 / Agent / API 三层测试
 ├── scripts/smoke.py   # 真实模型冒烟测试
 └── .github/workflows/ci.yml
@@ -180,7 +204,7 @@ python -m pytest -q
 - **SSE 流式接口**：事件顺序（tool_call → tool_result → delta → done）、流中错误、调用记录照常落库
 - 调用记录的 MySQL / JSONL 两种后端（MySQL 集成测试在没有数据库时自动跳过）
 
-当前 **35 个用例**。
+当前 **43 个用例**（含 MCP 服务器协议、客户端往返、挂载与降级测试）。
 
 ## 设计要点
 
@@ -194,11 +218,14 @@ python -m pytest -q
 8. **为什么并行执行工具**：模型一次给出多个互不依赖的调用（比如同时查时间和算数）时，串行执行纯属浪费；线程池并发跑完再按原顺序回填，既快又不破坏协议的对应关系（`tool_call_id` 一一对应）。
 9. **为什么要流式输出**：Agent 一步可能要等好几秒，全量返回前用户只能盯着「思考中」。改成 SSE 后，工具一执行就推送 `tool_call`/`tool_result`，回答边生成边推送 `delta`，前端进度与文字都是实时的，体验接近 ChatGPT；同时保留 `/api/chat` 一次性接口，方便脚本调用与测试。
 
+10. **为什么要接 MCP**：工具写死在进程里，加一个工具就要改代码、重启。MCP 把工具变成「外部服务器」，Agent 只需按名字调用——换工具/加数据源不用动主程序。我按协议自己实现了 stdio 客户端与服务端：`initialize → tools/list → tools/call` 三步，工具名加 `mcp__` 前缀区分来源；服务器起不来只跳过并在 `/api/mcp/status` 里报错，主流程不受影响。这比「静态工具列表」更接近真实生产里的插件化架构。
+
 ## 下一步扩展
 
 - [x] 多工具并行调用（一次返回多个 `tool_calls` 时并发执行）
 - [x] SQL 只读查询工具（连 RAG 项目的 `rag_kb`，白名单防写操作）
 - [x] 调用记录落库（MySQL，失败自动降级 `data/logs.jsonl`）
+- [x] MCP 外部工具服务器（stdio + JSON-RPC，自带 kb 服务器，支持降级）
 - [x] SSE 流式输出（工具进度 + 回答逐字推送）
 - [ ] 用 LangGraph 重写 Agent 循环（节点 + 条件边 + 检查点记忆）
 - [ ] 加上 `read_pdf` / `search_web` 等更实用的工具

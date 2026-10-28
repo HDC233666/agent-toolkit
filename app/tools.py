@@ -256,6 +256,10 @@ TOOL_FUNCS = {
 
 def run_tool(name: str, args: dict | None = None) -> dict:
     """按名字执行工具。永远返回 dict：错误也返回，交给模型判断下一步。"""
+    if isinstance(name, str) and name.startswith("mcp__"):
+        from .mcp_tools import get_manager
+
+        return get_manager().call(name, args or {})
     func = TOOL_FUNCS.get(name)
     if func is None:
         return {"ok": False, "error": f"没有这个工具：{name}"}

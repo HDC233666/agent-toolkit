@@ -81,6 +81,24 @@ User question
 - **Parallel calls**: one model turn can request several tools at once — they run in a thread pool (up to 4 workers) and the observations are appended in the original order.
 - **Read-only SQL**: `sql_query` talks to MySQL through the same `pymysql` connection settings as the call log; if no `SQL_DB_*` is configured it returns a friendly hint instead of failing.
 
+## MCP tools (external tool servers)
+
+Declare stdio servers in `data/mcp_servers.json`; they are started lazily on first use:
+
+```json
+{
+  "servers": [
+    { "name": "kb", "command": "python", "args": ["-m", "app.mcp_server"], "enabled": true }
+  ]
+}
+```
+
+- Protocol: JSON-RPC 2.0 over stdio with `initialize` / `tools/list` / `tools/call` / `ping` (a deliberately small MCP subset so the chain is readable);
+- Naming: `mcp__<server>__<tool>`, e.g. `mcp__kb__kb_search`;
+- The bundled `app/mcp_server.py` reuses `SQL_DB_*` to query the RAG project's `rag_kb` and exposes `kb_search` / `kb_stats`;
+- A server that fails to start is skipped and reported in `/api/mcp/status` → `errors`; local tools keep working;
+- Disable with `MCP_ENABLED=0`.
+
 ## Built-in tools
 
 | Tool | Description | Safety |
@@ -98,7 +116,8 @@ User question
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/health` | Health check + current model |
-| GET | `/api/tools` | Tool list (used by the frontend sidebar) |
+| GET | `/api/tools` | Tool list, local + MCP (used by the frontend sidebar) |
+| GET | `/api/mcp/status` | MCP server status (tool count, startup errors) |
 | POST | `/api/chat` | `{message, history}` → `{answer, steps, tokens}` (one shot) |
 | POST | `/api/chat/stream` | Same body, **SSE stream**: `tool_call` / `tool_result` / `delta` / `done` events |
 | GET | `/api/logs?limit=20` | Recent runs `{storage, totals, runs}` |
@@ -184,7 +203,7 @@ Tests inject a scripted fake model via `monkeypatch`, so they need **no API key 
 - **SSE stream**: event order (`tool_call` → `tool_result` → `delta` → `done`), in-stream errors, call logging still works
 - Call log: both MySQL and JSONL backends (the MySQL integration test is skipped when no database is available)
 
-**35 tests** at the moment.
+**43 tests** at the moment (including MCP server protocol, client round-trip, mounting and fallback).
 
 ## Design decisions
 
@@ -198,16 +217,19 @@ Tests inject a scripted fake model via `monkeypatch`, so they need **no API key 
 8. **Why run tools in parallel**: when the model returns independent calls (time + math), running them serially wastes seconds; a thread pool finishes them concurrently and back-fills in order without breaking `tool_call_id` pairing.
 9. **Why stream**: an Agent step can take seconds; SSE pushes `tool_call`/`tool_result` the moment they happen and `delta` chunks as the answer is generated. The one-shot `/api/chat` stays for scripts and tests.
 
+**Why MCP?** Tools hard-coded in-process mean every new tool needs a code change and a restart. MCP moves tools into external servers: the agent just calls them by name. I implemented the stdio client and server myself (`initialize → tools/list → tools/call`), namespaced tools with `mcp__`, and made failures non-fatal — closer to how plugins work in production.
+
 ## Next steps
 
 - [x] Parallel tool calls (execute multiple `tool_calls` concurrently)
 - [x] SQL read-only tool over the RAG project's `rag_kb`
 - [x] Persist call logs (MySQL, automatic JSONL fallback)
+- [x] MCP external tool servers (stdio + JSON-RPC, bundled kb server, graceful fallback)
 - [x] SSE streaming (tool progress + answer deltas)
 - [ ] Rewrite the Agent loop with LangGraph (nodes + conditional edges + checkpoint memory)
 - [ ] Add more practical tools (`read_pdf`, `search_web`, ...)
 - [ ] Human-approval mode (confirm before writing/deleting files)
-- [ ] Integrate the MCP protocol to reuse community tools
+- [ ] Support HTTP/SSE MCP transport and third-party community servers
 
 ## Code reading order
 
