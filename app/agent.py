@@ -10,7 +10,8 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor
 
-from .config import AGENT_MAX_STEPS
+from .approvals import registry
+from .config import AGENT_MAX_STEPS, APPROVAL_TIMEOUT_SECONDS, APPROVAL_TOOLS
 from .llm import chat_stream_with_tools, chat_with_tools
 from .mcp_tools import get_manager
 from .tools import TOOL_SCHEMAS, run_tool
@@ -36,6 +37,16 @@ SYSTEM_PROMPT = """你是一个会使用工具的 AI 助手，帮助用户完成
 用法和本地工具一样；如果它返回「未就绪 / 未配置」，说明该服务器不可用，换其他方式或如实告诉用户。"""
 
 MAX_HISTORY = 10
+
+DENIED_BY_APPROVAL = {"ok": False, "error": "用户未批准该操作（拒绝或超时），没有执行"}
+NON_STREAM_APPROVAL_HINT = {
+    "ok": False,
+    "error": "该工具需要人工审批，普通 /api/chat 接口不支持交互审批；请改用 /api/chat/stream",
+}
+
+
+def _needs_approval(tool_name: str) -> bool:
+    return tool_name in APPROVAL_TOOLS
 
 
 def _all_schemas() -> list[dict]:
@@ -106,8 +117,20 @@ def run_agent(
         messages.append(message)
 
         # 并行执行：模型一次返回多个 tool_calls 时，互不依赖的调用同时跑（最多 4 个并发）
+        def execute(call: dict) -> tuple[str, dict, dict]:
+            name = str(call["function"]["name"])
+            if _needs_approval(name):
+                # 先拦截再执行：普通接口没有交互通道，直接返回提示
+                raw = call["function"]["arguments"] or "{}"
+                try:
+                    args = json.loads(raw)
+                except Exception:  # noqa: BLE001
+                    args = {"_raw": raw}
+                return name, args, dict(NON_STREAM_APPROVAL_HINT)
+            return _execute_call(call)
+
         with ThreadPoolExecutor(max_workers=min(len(tool_calls), 4)) as pool:
-            executed = list(pool.map(_execute_call, tool_calls))
+            executed = list(pool.map(execute, tool_calls))
 
         for call, (name, args, observation) in zip(tool_calls, executed):
             steps.append(
@@ -196,8 +219,35 @@ def run_agent_stream(
         for offset, (name, args) in enumerate(parsed):
             yield {"type": "tool_call", "step": base + offset + 1, "tool": name, "args": args}
 
-        with ThreadPoolExecutor(max_workers=min(len(tool_calls), 4)) as pool:
-            executed = list(pool.map(_execute_call, tool_calls))
+        # 需要人工审批的工具先挂起等用户决定；其余工具并行执行
+        denied: dict[int, dict] = {}
+        runnable: list[tuple[int, dict]] = []
+        for idx, (call, (name, args)) in enumerate(zip(tool_calls, parsed)):
+            if _needs_approval(name) and "_error" not in args:
+                approval = registry.create(name, args)
+                yield {
+                    "type": "approval_required",
+                    "step": base + idx + 1,
+                    "approval": approval.as_dict(),
+                }
+                if registry.wait(approval.id, APPROVAL_TIMEOUT_SECONDS) is not True:
+                    denied[idx] = dict(DENIED_BY_APPROVAL)
+                    continue
+            runnable.append((idx, call))
+
+        results: dict[int, tuple[str, dict, dict]] = {}
+        if runnable:
+            with ThreadPoolExecutor(max_workers=min(len(runnable), 4)) as pool:
+                futures = {pool.submit(_execute_call, call): idx for idx, call in runnable}
+                for future, idx in futures.items():
+                    results[idx] = future.result()
+
+        executed: list[tuple[str, dict, dict]] = []
+        for idx, (name, args) in enumerate(parsed):
+            if idx in denied:
+                executed.append((name, args, denied[idx]))
+            else:
+                executed.append(results[idx])
 
         for offset, ((name, args), call, (_, _, observation)) in enumerate(zip(parsed, tool_calls, executed)):
             step_no = base + offset + 1

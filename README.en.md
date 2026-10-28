@@ -7,10 +7,13 @@ A hand-written **AI Agent** mini-project: the LLM decides on its own when to che
 > Job-hunting project 2/2: project 1 is [RAG Knowledge Base Q&A](../rag-knowledge-base). Together they cover the two core LLM-application skills: **retrieval augmentation** and **tool calling**.
 
 - 🧠 **The model only decides**: OpenAI-compatible API + `function calling`
-- 🛠️ **7 real tools**: calculator (safe `ast` evaluation), current time, list files, read file, write file, fetch URL, read-only SQL
+- 🛠️ **9 real tools**: 7 local (calculator with safe `ast` evaluation, current time, list/read/write files, fetch URL, read-only SQL) + 2 MCP tools
 - 🔁 **Agent loop**: call tool → observe result → decide again, max 6 steps to prevent infinite loops
 - 📡 **Streaming (SSE)**: tool progress and the final answer are pushed to the browser in real time, token by token
 - ⚡ **Parallel tool calls**: when the model returns several `tool_calls` at once, they run concurrently in a thread pool
+- 🧩 **MCP integration**: external stdio tool servers (JSON-RPC 2.0) are discovered and mounted as `mcp__<server>__<tool>`; a broken server degrades gracefully
+- 🛡️ **Human-in-the-loop approval**: `write_file` (configurable via `AGENT_APPROVAL_TOOLS`) pauses and waits for an explicit Allow before executing; timeout counts as deny
+- 🛡️ **Rate limiting & observability**: per-IP rate limit (`AGENT_RATE_LIMIT`, 429 + `Retry-After`), Prometheus metrics at `/api/metrics`, `X-Request-Id` on every response
 - 🔒 **Safety boundaries**: file tools are confined to the `data/workspace` sandbox; SQL is whitelist-guarded; no arbitrary code execution
 - 🖥️ **Visualized**: the frontend shows the "thought process" (which tool, arguments, result at every step)
 - 🗂️ **Call logging**: every conversation and tool call is persisted to MySQL (`agent_runs` / `tool_calls`); the UI shows a "Recent runs" panel. Without a database it falls back to local JSONL, so tests and demos never break.
@@ -19,6 +22,10 @@ A hand-written **AI Agent** mini-project: the LLM decides on its own when to che
 | Tool-call trace | API docs (Swagger UI) |
 |---|---|
 | ![Chat UI](docs/screenshots/chat.png) | ![API docs](docs/screenshots/api.png) |
+
+Human-in-the-loop approval before sensitive tools run:
+
+![Approval card](docs/screenshots/approval.png)
 
 ## Quick start
 
@@ -121,6 +128,8 @@ Declare stdio servers in `data/mcp_servers.json`; they are started lazily on fir
 | POST | `/api/chat` | `{message, history}` → `{answer, steps, tokens}` (one shot) |
 | POST | `/api/chat/stream` | Same body, **SSE stream**: `tool_call` / `tool_result` / `delta` / `done` events |
 | GET | `/api/logs?limit=20` | Recent runs `{storage, totals, runs}` |
+| GET | `/api/metrics` | Prometheus text metrics (chats / tool calls / errors) |
+| POST | `/api/approve` | Submit approval decision `{approval_id, approve}` |
 
 SSE event shape (`data: {...}`, one JSON per event):
 
@@ -202,8 +211,10 @@ Tests inject a scripted fake model via `monkeypatch`, so they need **no API key 
 - API health check, tool list, chat, parameter validation, model-error mapping
 - **SSE stream**: event order (`tool_call` → `tool_result` → `delta` → `done`), in-stream errors, call logging still works
 - Call log: both MySQL and JSONL backends (the MySQL integration test is skipped when no database is available)
+- Approvals: pending → allow/deny/timeout, and the guard that blocks non-stream calls
+- Rate limit / metrics: per-IP 429, Prometheus counters, `X-Request-Id`
 
-**43 tests** at the moment (including MCP server protocol, client round-trip, mounting and fallback).
+**52 tests** at the moment (including MCP server protocol, client round-trip, mounting and fallback, approvals, rate limiting and metrics).
 
 ## Design decisions
 
@@ -228,7 +239,7 @@ Tests inject a scripted fake model via `monkeypatch`, so they need **no API key 
 - [x] SSE streaming (tool progress + answer deltas)
 - [ ] Rewrite the Agent loop with LangGraph (nodes + conditional edges + checkpoint memory)
 - [ ] Add more practical tools (`read_pdf`, `search_web`, ...)
-- [ ] Human-approval mode (confirm before writing/deleting files)
+- [x] Human-in-the-loop approval (pause before `write_file`, configurable)
 - [ ] Support HTTP/SSE MCP transport and third-party community servers
 
 ## Code reading order

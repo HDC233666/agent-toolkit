@@ -224,6 +224,54 @@ async function readSSE(response, onEvent) {
   }
 }
 
+/** 人工审批卡片：危险工具执行前让用户点「允许 / 拒绝」 */
+function renderApproval(event, container, statusEl) {
+  const approval = event.approval || {};
+  const card = document.createElement("div");
+  card.className = "approval";
+
+  const title = document.createElement("div");
+  title.className = "approval-title";
+  title.innerHTML = `⚠️ 需要你确认：<code>${escapeHtml(approval.tool || "")}</code>`;
+
+  const args = document.createElement("pre");
+  args.className = "approval-args";
+  args.textContent = JSON.stringify(approval.args || {}, null, 2).slice(0, 600);
+
+  const actions = document.createElement("div");
+  actions.className = "approval-actions";
+  const allow = document.createElement("button");
+  allow.textContent = "允许执行";
+  const deny = document.createElement("button");
+  deny.className = "ghost";
+  deny.textContent = "拒绝";
+  actions.append(allow, deny);
+  card.append(title, args, actions);
+  container.appendChild(card);
+  if (statusEl) statusEl.textContent = "等待你确认工具调用…";
+
+  const decide = async (approve) => {
+    allow.disabled = true;
+    deny.disabled = true;
+    card.classList.add(approve ? "approved" : "denied");
+    title.innerHTML = approve
+      ? `✅ 已允许执行 <code>${escapeHtml(approval.tool || "")}</code>`
+      : `⛔ 已拒绝 <code>${escapeHtml(approval.tool || "")}</code>`;
+    try {
+      await fetch("/api/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approval_id: approval.id, approve }),
+      });
+    } catch (error) {
+      // 忽略网络错误：审批超时后端会自动按拒绝处理
+    }
+    if (statusEl) statusEl.textContent = "继续执行…";
+  };
+  allow.addEventListener("click", () => decide(true));
+  deny.addEventListener("click", () => decide(false));
+}
+
 async function send() {
   if (busy) return;
   const text = input.value.trim();
@@ -263,6 +311,8 @@ async function send() {
         const target = steps.find((step) => step.step === event.step && !step.result);
         if (target) target.result = event.result;
         progressEl.innerHTML = renderProgress(steps);
+      } else if (event.type === "approval_required") {
+        renderApproval(event, progressEl, statusEl);
       } else if (event.type === "delta") {
         answerText += event.text;
         answerEl.innerHTML = renderMarkdown(answerText);

@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from . import llm, metrics
 from .agent import _all_schemas, run_agent, run_agent_stream
+from .approvals import registry
 from .config import DEEPSEEK_API_KEY, DEEPSEEK_MODEL, RATE_LIMIT_PER_MIN, STATIC_DIR
 from .mcp_tools import get_manager
 from .recorder import make_recorder
@@ -51,6 +52,11 @@ async def rate_limit(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Request-Id"] = f"{int(time.time() * 1000) % 10**9:09d}"
     return response
+
+
+class ApprovalRequest(BaseModel):
+    approval_id: str = Field(min_length=4, max_length=64)
+    approve: bool
 
 
 class ChatRequest(BaseModel):
@@ -151,6 +157,15 @@ def chat_stream(payload: ChatRequest):
     )
 
 
+@app.post("/api/approve")
+def approve(payload: ApprovalRequest) -> dict:
+    """人工审批：允许/拒绝一个挂起的工具调用（前端点按钮时调用）。"""
+    if not registry.decide(payload.approval_id, payload.approve):
+        raise HTTPException(status_code=404, detail="审批不存在或已过期")
+    metrics.incr("agent_approvals_total")
+    return {"ok": True, "approved": payload.approve}
+
+
 @app.get("/api/logs")
 def logs(limit: int = 20) -> dict:
     """最近的调用记录（审计 / 回放用）。"""
@@ -167,4 +182,5 @@ def logs(limit: int = 20) -> dict:
 def prometheus_metrics() -> str:
     """Prometheus 文本格式指标（调用量 / 工具调用数 / 错误数）。"""
     metrics.set_gauge("agent_tools", len(_all_schemas()))
+    metrics.set_gauge("agent_pending_approvals", registry.pending_count())
     return metrics.render_prometheus()

@@ -404,8 +404,9 @@ body {
 .bubble .progress {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   gap: 6px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .bubble .progress:empty {
@@ -464,3 +465,40 @@ body {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+
+
+/* 人工审批卡片 */
+.approval {
+  margin: 8px 0;
+  border: 1px solid #f0c36d;
+  background: #fff8e6;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.approval.approved { border-color: #9bd19b; background: #f2fbf2; }
+.approval.denied { border-color: #e3a3a3; background: #fdf3f3; }
+.approval-title { font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+.approval-args {
+  margin: 0 0 8px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  font-size: 12px;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.approval-actions { display: flex; gap: 8px; }
+.approval-actions button {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid #2f54eb;
+  background: #2f54eb;
+  color: #fff;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.approval-actions button.ghost { background: #fff; color: #555; border-color: #ccc; }
+.approval-actions button:disabled { opacity: .5; cursor: default; }

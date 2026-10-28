@@ -16,12 +16,17 @@
 - 🔒 **安全边界**：文件工具被限制在 `data/workspace` 沙箱内，不执行任意代码
 - 🖥️ **可视化**：前端直接展示「思考过程」（每步调了什么、参数、结果），回答支持 Markdown 渲染
 - 🗂️ **调用记录**：每次对话与工具调用落库 MySQL（`agent_runs` / `tool_calls` 两张表），前端展示「最近记录」；没配数据库时自动降级为本地 JSONL，测试照样跑
+- 🛡️ **人工审批**：`write_file` 等危险工具执行前挂起，界面点「允许」才执行（`AGENT_APPROVAL_TOOLS` 可配置，超时按拒绝处理）
 - 🛡️ **限流与可观测**：按 IP 每分钟限流（`AGENT_RATE_LIMIT`，超限 429）、`/api/metrics` 暴露 Prometheus 指标、每个响应带 `X-Request-Id`
 - ✅ **可测试**：不依赖真实模型和网络也能跑测试，GitHub Actions 自动跑
 
 | 工具调用过程 | API 文档（Swagger UI） |
 |---|---|
 | ![对话界面](docs/screenshots/chat.png) | ![API 文档](docs/screenshots/api.png) |
+
+危险工具执行前的人工审批卡片：
+
+![人工审批](docs/screenshots/approval.png)
 
 ## 快速开始
 
@@ -120,6 +125,7 @@ python scripts/smoke.py
 | POST | `/api/chat/stream` | 同上入参，**SSE 流式**：`tool_call` / `tool_result` / `delta` / `done` 事件 |
 | GET | `/api/logs?limit=20` | 最近调用记录 `{storage, totals, runs}` |
 | GET | `/api/metrics` | Prometheus 文本指标（对话数 / 工具调用数 / 错误数） |
+| POST | `/api/approve` | 提交人工审批结果 `{approval_id, approve}`（前端审批卡片用） |
 
 SSE 事件格式（`data: {...}`，每条事件一行 JSON）：
 
@@ -206,7 +212,7 @@ python -m pytest -q
 - **SSE 流式接口**：事件顺序（tool_call → tool_result → delta → done）、流中错误、调用记录照常落库
 - 调用记录的 MySQL / JSONL 两种后端（MySQL 集成测试在没有数据库时自动跳过）
 
-当前 **46 个用例**（含 MCP 服务器协议、客户端往返、挂载与降级、限流与指标测试）。
+当前 **52 个用例**（含 MCP 服务器协议、客户端往返、挂载与降级、限流与指标测试）。
 
 ## 设计要点
 
@@ -216,7 +222,8 @@ python -m pytest -q
 4. **为什么限制步数**：模型可能陷入「调工具 → 失败 → 再调」的死循环，`AGENT_MAX_STEPS` 是最后一道保险。
 5. **为什么工具描述要写清楚**：`function.description` 和参数 `description` 是给模型看的说明，写得越具体，模型调错工具的概率越低。
 6. **为什么要限流和指标**：Agent 一次任务可能调好几次模型，公开 demo 被刷就是真金白银；按 IP 限流 + 429 是成本底线。`/api/metrics` 让调用量、工具调用次数、错误数可被 Prometheus 抓取，演示「能观测」也算工程完整度。
-7. **为什么要记录调用**：线上排查问题靠日志。`agent_runs` 记一次问答的耗时/tokens/步数，`tool_calls` 记每一步工具与结果，按时间倒序直接查。数据库连不上时降级写 JSONL，保证演示和测试不被环境卡住。
+7. **为什么危险工具要人工审批**：模型可能被提示词诱导执行越权操作，`write_file` 这类有副作用的工具先挂起、由人确认，才是生产级 Agent 的默认姿势；超时按拒绝处理，保证请求不会永久卡住。
+8. **为什么要记录调用**：线上排查问题靠日志。`agent_runs` 记一次问答的耗时/tokens/步数，`tool_calls` 记每一步工具与结果，按时间倒序直接查。数据库连不上时降级写 JSONL，保证演示和测试不被环境卡住。
 7. **为什么 SQL 工具要自己做白名单**：模型生成的 SQL 不能直接送进数据库——`DELETE`/`DROP` 一条就够出事。所以先去注释、再校验单语句、只放行只读前缀、按整词扫描写操作关键字，最后限行数、限超时；不合法就返回结构化错误让模型改写。
 8. **为什么并行执行工具**：模型一次给出多个互不依赖的调用（比如同时查时间和算数）时，串行执行纯属浪费；线程池并发跑完再按原顺序回填，既快又不破坏协议的对应关系（`tool_call_id` 一一对应）。
 9. **为什么要流式输出**：Agent 一步可能要等好几秒，全量返回前用户只能盯着「思考中」。改成 SSE 后，工具一执行就推送 `tool_call`/`tool_result`，回答边生成边推送 `delta`，前端进度与文字都是实时的，体验接近 ChatGPT；同时保留 `/api/chat` 一次性接口，方便脚本调用与测试。
@@ -232,7 +239,7 @@ python -m pytest -q
 - [x] SSE 流式输出（工具进度 + 回答逐字推送）
 - [ ] 用 LangGraph 重写 Agent 循环（节点 + 条件边 + 检查点记忆）
 - [ ] 加上 `read_pdf` / `search_web` 等更实用的工具
-- [ ] 人工审批模式（写文件/删文件前先确认）
+- [x] 人工审批模式（写文件前挂起确认，`AGENT_APPROVAL_TOOLS`）
 - [ ] 接入 MCP 协议，复用社区工具
 
 ## 代码阅读顺序

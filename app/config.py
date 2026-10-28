@@ -42,6 +42,14 @@ SQL_DB_USER = os.getenv("SQL_DB_USER", "root").strip()
 SQL_DB_PASSWORD = os.getenv("SQL_DB_PASSWORD", "")
 SQL_DB_NAME = os.getenv("SQL_DB_NAME", "rag_kb").strip()
 
+# ===== 人工审批（human-in-the-loop）=====
+# 这些工具在执行前需要用户在界面上点「允许」；逗号分隔，留空 = 关闭审批
+APPROVAL_TOOLS = tuple(
+    t.strip() for t in os.getenv("AGENT_APPROVAL_TOOLS", "write_file").split(",") if t.strip()
+)
+# 等待用户审批的最长秒数，超时按拒绝处理（防止请求永久挂起）
+APPROVAL_TIMEOUT_SECONDS = float(os.getenv("AGENT_APPROVAL_TIMEOUT", "120"))
+
 # ===== MCP 工具服务器（可选）=====
 # 配置文件里列出的 stdio 工具服务器会在首次调用时自动启动；
 # 设 MCP_ENABLED=0 可整体关闭（本地工具不受影响）
