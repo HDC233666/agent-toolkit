@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -125,3 +127,55 @@ def test_chat_maps_llm_error_to_502(monkeypatch) -> None:
         response = client.post("/api/chat", json={"message": "hi"})
 
     assert response.status_code == 502
+
+
+def _sse_events(body: str) -> list[dict]:
+    return [json.loads(line[6:]) for line in body.splitlines() if line.startswith("data: ")]
+
+
+def test_chat_stream_pushes_tool_events(monkeypatch, stub_recorder) -> None:
+    def fake_stream(message, history=None, max_steps=None):  # noqa: ANN001
+        yield {"type": "tool_call", "step": 1, "tool": "now", "args": {}}
+        yield {"type": "tool_result", "step": 1, "ok": True, "result": {"ok": True, "time": "12:00"}}
+        yield {"type": "delta", "text": "现在"}
+        yield {"type": "delta", "text": "是 12 点"}
+        yield {
+            "type": "done",
+            "answer": "现在是 12 点",
+            "steps": [{"step": 1, "tool": "now", "args": {}, "result": {"ok": True}}],
+            "tokens": 9,
+        }
+
+    monkeypatch.setattr(main_module, "run_agent_stream", fake_stream)
+
+    with TestClient(fastapi_app) as client:
+        with client.stream("POST", "/api/chat/stream", json={"message": "现在几点？"}) as response:
+            assert response.status_code == 200
+            assert response.headers["content-type"].startswith("text/event-stream")
+            body = "".join(response.iter_text())
+
+    events = _sse_events(body)
+    assert [event["type"] for event in events] == [
+        "tool_call",
+        "tool_result",
+        "delta",
+        "delta",
+        "done",
+    ]
+    assert events[-1]["answer"] == "现在是 12 点"
+    assert stub_recorder.calls and stub_recorder.calls[0]["answer"] == "现在是 12 点"
+
+
+def test_chat_stream_maps_llm_error(monkeypatch) -> None:
+    def boom(message, history=None, max_steps=None):  # noqa: ANN001
+        raise LLMError("模拟网络失败")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(main_module, "run_agent_stream", boom)
+
+    with TestClient(fastapi_app) as client:
+        with client.stream("POST", "/api/chat/stream", json={"message": "hi"}) as response:
+            body = "".join(response.iter_text())
+
+    assert '"error"' in body
+    assert "模拟网络失败" in body

@@ -9,6 +9,7 @@
 - 🧠 **模型只负责决策**：OpenAI 兼容接口 + `function calling`
 - 🛠️ **6 个真实工具**：计算器（ast 安全求值）、当前时间、列文件、读文件、写文件、抓网页
 - 🔁 **Agent 循环**：调工具 → 观察结果 → 再决策，最多 6 步，防止死循环
+- 📡 **流式输出（SSE）**：工具执行过程和最终回答实时推给前端，回答像打字机一样逐字出现
 - ⚡ **并行工具调用**：模型一次返回多个 `tool_calls` 时用线程池并发执行（属于 Function Calling 进阶用法）
 - 🗄️ **SQL 工具**：`sql_query` 对 MySQL 示例库 `rag_kb` 做**只读**查询（白名单 + 禁写关键字），和 RAG 项目共用同一份数据
 - 🔒 **安全边界**：文件工具被限制在 `data/workspace` 沙箱内，不执行任意代码
@@ -92,13 +93,24 @@ python scripts/smoke.py
 |---|---|---|
 | GET | `/api/health` | 健康检查 + 当前模型 |
 | GET | `/api/tools` | 工具列表（前端侧边栏用） |
-| POST | `/api/chat` | `{message, history}` → `{answer, steps, tokens}` |
+| POST | `/api/chat` | `{message, history}` → `{answer, steps, tokens}`（一次性返回） |
+| POST | `/api/chat/stream` | 同上入参，**SSE 流式**：`tool_call` / `tool_result` / `delta` / `done` 事件 |
 | GET | `/api/logs?limit=20` | 最近调用记录 `{storage, totals, runs}` |
+
+SSE 事件格式（`data: {...}`，每条事件一行 JSON）：
+
+| 事件 | 载荷 | 含义 |
+|---|---|---|
+| `tool_call` | `{step, tool, args}` | 模型决定调用某个工具 |
+| `tool_result` | `{step, ok, result}` | 工具执行完毕（结果同时回灌给模型） |
+| `delta` | `{text}` | 回答的一段增量文本，前端逐字渲染 |
+| `done` | `{answer, steps, tokens}` | 整轮结束，附带完整结果 |
+| `error` | `{detail}` | 模型或工具出错 |
 
 请求示例：
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/chat \
+curl -N -X POST http://127.0.0.1:8000/api/chat/stream \
   -H "Content-Type: application/json" \
   -d "{\"message\": \"算一下 1234*56，把结果写进 result.txt\"}"
 ```
@@ -118,7 +130,7 @@ curl -X POST http://127.0.0.1:8000/api/chat \
 
 ## 调用记录（MySQL）
 
-每次 `/api/chat` 结束后，把这次对话写入两张表（DDL 见 `app/recorder.py`）：
+每次对话结束（`/api/chat` 或 `/api/chat/stream`）后，把这次对话写入两张表（DDL 见 `app/recorder.py`）：
 
 | 表 | 作用 |
 |---|---|
@@ -163,7 +175,10 @@ python -m pytest -q
 - Agent 的「调工具 → 回灌 → 回答」流程、坏参数、步数上限
 - **多个工具调用的并行执行**（一次返回两个 `tool_calls`，顺序回填且都进入 steps）
 - API 的健康检查、工具列表、对话、参数校验、模型错误映射
+- **SSE 流式接口**：事件顺序（tool_call → tool_result → delta → done）、流中错误、调用记录照常落库
 - 调用记录的 MySQL / JSONL 两种后端（MySQL 集成测试在没有数据库时自动跳过）
+
+当前 **35 个用例**。
 
 ## 设计要点
 
@@ -175,12 +190,14 @@ python -m pytest -q
 6. **为什么要记录调用**：线上排查问题靠日志。`agent_runs` 记一次问答的耗时/tokens/步数，`tool_calls` 记每一步工具与结果，按时间倒序直接查。数据库连不上时降级写 JSONL，保证演示和测试不被环境卡住。
 7. **为什么 SQL 工具要自己做白名单**：模型生成的 SQL 不能直接送进数据库——`DELETE`/`DROP` 一条就够出事。所以先去注释、再校验单语句、只放行只读前缀、按整词扫描写操作关键字，最后限行数、限超时；不合法就返回结构化错误让模型改写。
 8. **为什么并行执行工具**：模型一次给出多个互不依赖的调用（比如同时查时间和算数）时，串行执行纯属浪费；线程池并发跑完再按原顺序回填，既快又不破坏协议的对应关系（`tool_call_id` 一一对应）。
+9. **为什么要流式输出**：Agent 一步可能要等好几秒，全量返回前用户只能盯着「思考中」。改成 SSE 后，工具一执行就推送 `tool_call`/`tool_result`，回答边生成边推送 `delta`，前端进度与文字都是实时的，体验接近 ChatGPT；同时保留 `/api/chat` 一次性接口，方便脚本调用与测试。
 
 ## 下一步扩展
 
 - [x] 多工具并行调用（一次返回多个 `tool_calls` 时并发执行）
 - [x] SQL 只读查询工具（连 RAG 项目的 `rag_kb`，白名单防写操作）
 - [x] 调用记录落库（MySQL，失败自动降级 `data/logs.jsonl`）
+- [x] SSE 流式输出（工具进度 + 回答逐字推送）
 - [ ] 用 LangGraph 重写 Agent 循环（节点 + 条件边 + 检查点记忆）
 - [ ] 加上 `read_pdf` / `search_web` 等更实用的工具
 - [ ] 人工审批模式（写文件/删文件前先确认）

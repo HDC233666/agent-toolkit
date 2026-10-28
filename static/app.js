@@ -192,6 +192,38 @@ function renderLogs(payload) {
     .join("");
 }
 
+function renderProgress(steps) {
+  if (!steps.length) return "";
+  return steps
+    .map((step) => {
+      const pending = !step.result;
+      const ok = step.result && step.result.ok;
+      const badge = pending ? "…" : ok ? "✓" : "✗";
+      const cls = pending ? "run-step" : `run-step ${ok ? "ok" : "fail"}`;
+      return `<div class="${cls}"><span class="run-index">${step.step || ""}</span>${escapeHtml(step.tool)} ${badge}</div>`;
+    })
+    .join("");
+}
+
+/** 读取 SSE 流：每个 data: {...} 事件回调一次 */
+async function readSSE(response, onEvent) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let index;
+    while ((index = buffer.indexOf("\n\n")) >= 0) {
+      const frame = buffer.slice(0, index);
+      buffer = buffer.slice(index + 2);
+      const line = frame.split("\n").find((item) => item.startsWith("data: "));
+      if (line) onEvent(JSON.parse(line.slice(6)));
+    }
+  }
+}
+
 async function send() {
   if (busy) return;
   const text = input.value.trim();
@@ -202,22 +234,58 @@ async function send() {
   sendBtn.disabled = true;
   statusEl.textContent = "Agent 思考中…";
 
+  const row = addBubble("assistant", '<div class="progress"></div><div class="answer"></div>');
+  const progressEl = row.querySelector(".progress");
+  const answerEl = row.querySelector(".answer");
+
+  let answerText = "";
+  let steps = [];
+  let tokens = null;
+  let errorMessage = "";
+
   try {
-    const response = await fetch("/api/chat", {
+    const response = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: text, history }),
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.detail || `HTTP ${response.status}`);
+    }
 
-    addBubble("assistant", renderMarkdown(data.answer) + renderSteps(data.steps));
-    history.push({ role: "user", content: text }, { role: "assistant", content: data.answer });
+    await readSSE(response, (event) => {
+      if (event.type === "tool_call") {
+        steps.push({ step: event.step, tool: event.tool, args: event.args, result: null });
+        progressEl.innerHTML = renderProgress(steps);
+        statusEl.textContent = `执行工具：${event.tool}…`;
+      } else if (event.type === "tool_result") {
+        const target = steps.find((step) => step.step === event.step && !step.result);
+        if (target) target.result = event.result;
+        progressEl.innerHTML = renderProgress(steps);
+      } else if (event.type === "delta") {
+        answerText += event.text;
+        answerEl.innerHTML = renderMarkdown(answerText);
+        statusEl.textContent = "生成回答中…";
+      } else if (event.type === "done") {
+        answerText = event.answer || answerText;
+        steps = event.steps || steps;
+        tokens = event.tokens;
+      } else if (event.type === "error") {
+        throw new Error(event.detail || "执行失败");
+      }
+      chatList.scrollTop = chatList.scrollHeight;
+    });
+
+    row.querySelector(".bubble").innerHTML = renderMarkdown(answerText) + renderSteps(steps);
+    history.push({ role: "user", content: text }, { role: "assistant", content: answerText });
     if (history.length > 20) history = history.slice(-20);
-    statusEl.textContent = data.tokens ? `完成 · 约 ${data.tokens} tokens` : "完成";
+    statusEl.textContent = tokens ? `完成 · 约 ${tokens} tokens` : "完成";
     loadLogs();
   } catch (error) {
-    addBubble("error", `出错了：${multiline(error.message)}`);
+    errorMessage = error.message;
+    row.remove();
+    addBubble("error", `出错了：${multiline(errorMessage)}`);
     statusEl.textContent = "";
   } finally {
     busy = false;

@@ -71,3 +71,69 @@ def chat_with_tools(messages: list[dict], tools: list[dict] | None = None) -> di
             raise LLMError(f"DeepSeek 接口报错：{exc}") from exc
 
     raise LLMError(f"网络重试 3 次仍然失败：{last_error}")
+
+
+def chat_stream_with_tools(messages: list[dict], tools: list[dict] | None = None):
+    """流式对话（支持 function calling）。
+
+    yield：
+        {"delta": "文本增量"}                    模型在说最终答案
+        {"tool_call_delta": {...}}               工具调用参数片段（内部拼接用）
+        {"done": True, "content", "tool_calls", "tokens"}  本轮结束
+    """
+    client = get_client()
+    kwargs: dict = {"model": DEEPSEEK_MODEL, "messages": messages, "stream": True}
+    if tools:
+        kwargs["tools"] = tools
+    try:
+        try:
+            stream = client.chat.completions.create(**kwargs, stream_options={"include_usage": True})
+        except APIError as exc:
+            if "stream_options" not in str(exc):
+                raise
+            stream = client.chat.completions.create(**kwargs)
+
+        content_parts: list[str] = []
+        slot_by_index: dict[int, dict] = {}
+        tokens = None
+        for chunk in stream:
+            usage = getattr(chunk, "usage", None)
+            if usage is not None:
+                tokens = getattr(usage, "total_tokens", None)
+            for choice in getattr(chunk, "choices", None) or []:
+                delta = getattr(choice, "delta", None)
+                if delta is None:
+                    continue
+                text = getattr(delta, "content", None)
+                if text:
+                    content_parts.append(text)
+                    yield {"delta": text}
+                for item in getattr(delta, "tool_calls", None) or []:
+                    slot = slot_by_index.setdefault(item.index, {"id": None, "name": "", "arguments": ""})
+                    if item.id:
+                        slot["id"] = item.id
+                    function = getattr(item, "function", None)
+                    if function is not None:
+                        if getattr(function, "name", None):
+                            slot["name"] += function.name
+                        if getattr(function, "arguments", None):
+                            slot["arguments"] += function.arguments
+
+        tool_calls = [
+            {
+                "id": slot["id"] or f"call_{index}",
+                "type": "function",
+                "function": {"name": slot["name"], "arguments": slot["arguments"] or "{}"},
+            }
+            for index, slot in sorted(slot_by_index.items())
+        ]
+        yield {
+            "done": True,
+            "content": "".join(content_parts),
+            "tool_calls": tool_calls,
+            "tokens": tokens,
+        }
+    except (APIConnectionError, APITimeoutError) as exc:
+        raise LLMError(f"网络连接失败：{exc}") from exc
+    except APIError as exc:
+        raise LLMError(f"DeepSeek 接口报错：{exc}") from exc

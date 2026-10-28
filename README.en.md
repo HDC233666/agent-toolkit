@@ -7,9 +7,11 @@ A hand-written **AI Agent** mini-project: the LLM decides on its own when to che
 > Job-hunting project 2/2: project 1 is [RAG Knowledge Base Q&A](../rag-knowledge-base). Together they cover the two core LLM-application skills: **retrieval augmentation** and **tool calling**.
 
 - 🧠 **The model only decides**: OpenAI-compatible API + `function calling`
-- 🛠️ **6 real tools**: calculator (safe `ast` evaluation), current time, list files, read file, write file, fetch URL
+- 🛠️ **7 real tools**: calculator (safe `ast` evaluation), current time, list files, read file, write file, fetch URL, read-only SQL
 - 🔁 **Agent loop**: call tool → observe result → decide again, max 6 steps to prevent infinite loops
-- 🔒 **Safety boundaries**: file tools are confined to the `data/workspace` sandbox; no arbitrary code execution
+- 📡 **Streaming (SSE)**: tool progress and the final answer are pushed to the browser in real time, token by token
+- ⚡ **Parallel tool calls**: when the model returns several `tool_calls` at once, they run concurrently in a thread pool
+- 🔒 **Safety boundaries**: file tools are confined to the `data/workspace` sandbox; SQL is whitelist-guarded; no arbitrary code execution
 - 🖥️ **Visualized**: the frontend shows the "thought process" (which tool, arguments, result at every step)
 - 🗂️ **Call logging**: every conversation and tool call is persisted to MySQL (`agent_runs` / `tool_calls`); the UI shows a "Recent runs" panel. Without a database it falls back to local JSONL, so tests and demos never break.
 - ✅ **Testable**: tests run without a real model or network; GitHub Actions runs them automatically
@@ -95,13 +97,24 @@ User question
 |---|---|---|
 | GET | `/api/health` | Health check + current model |
 | GET | `/api/tools` | Tool list (used by the frontend sidebar) |
-| POST | `/api/chat` | `{message, history}` → `{answer, steps, tokens}` |
+| POST | `/api/chat` | `{message, history}` → `{answer, steps, tokens}` (one shot) |
+| POST | `/api/chat/stream` | Same body, **SSE stream**: `tool_call` / `tool_result` / `delta` / `done` events |
 | GET | `/api/logs?limit=20` | Recent runs `{storage, totals, runs}` |
+
+SSE event shape (`data: {...}`, one JSON per event):
+
+| Event | Payload | Meaning |
+|---|---|---|
+| `tool_call` | `{step, tool, args}` | The model decided to call a tool |
+| `tool_result` | `{step, ok, result}` | Tool finished (result is fed back to the model) |
+| `delta` | `{text}` | Incremental answer text |
+| `done` | `{answer, steps, tokens}` | Turn finished with the final result |
+| `error` | `{detail}` | Model or tool failure |
 
 Request example:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/chat \
+curl -N -X POST http://127.0.0.1:8000/api/chat/stream \
   -H "Content-Type: application/json" \
   -d "{\"message\": \"算一下 1234*56，把结果写进 result.txt\"}"
 ```
@@ -162,9 +175,14 @@ Tests inject a scripted fake model via `monkeypatch`, so they need **no API key 
 
 - Calculator: normal / malicious / division-by-zero inputs
 - File sandbox and path-traversal blocking
+- SQL tool: read-only whitelist, blocked writes/multi-statements/comments, clear error when unconfigured
 - Agent flow "call tool → feed back → answer", malformed arguments, step limit
+- **Parallel tool calls** (two `tool_calls` in one turn, ordered back-fill)
 - API health check, tool list, chat, parameter validation, model-error mapping
+- **SSE stream**: event order (`tool_call` → `tool_result` → `delta` → `done`), in-stream errors, call logging still works
 - Call log: both MySQL and JSONL backends (the MySQL integration test is skipped when no database is available)
+
+**35 tests** at the moment.
 
 ## Design decisions
 
@@ -174,11 +192,16 @@ Tests inject a scripted fake model via `monkeypatch`, so they need **no API key 
 4. **Why limit steps**: the model can loop "call tool → fail → call again"; `AGENT_MAX_STEPS` is the last line of defense.
 5. **Why tool descriptions matter**: `function.description` and parameter descriptions are instructions for the model — the more precise, the fewer wrong-tool calls.
 6. **Why log calls**: debugging production means reading logs. `agent_runs` stores latency/tokens/steps per conversation; `tool_calls` stores each tool step with its result. When MySQL is down it degrades to JSONL so demos and tests never block.
+7. **Why guard SQL ourselves**: model-generated SQL cannot go straight to the database — a single `DROP` is enough. Strip comments, enforce one statement, whitelist read-only prefixes, word-scan write keywords, cap rows and timeouts; invalid SQL becomes a structured error the model can fix.
+8. **Why run tools in parallel**: when the model returns independent calls (time + math), running them serially wastes seconds; a thread pool finishes them concurrently and back-fills in order without breaking `tool_call_id` pairing.
+9. **Why stream**: an Agent step can take seconds; SSE pushes `tool_call`/`tool_result` the moment they happen and `delta` chunks as the answer is generated. The one-shot `/api/chat` stays for scripts and tests.
 
 ## Next steps
 
-- [ ] Parallel tool calls (execute multiple `tool_calls` concurrently)
+- [x] Parallel tool calls (execute multiple `tool_calls` concurrently)
+- [x] SQL read-only tool over the RAG project's `rag_kb`
 - [x] Persist call logs (MySQL, automatic JSONL fallback)
+- [x] SSE streaming (tool progress + answer deltas)
 - [ ] Rewrite the Agent loop with LangGraph (nodes + conditional edges + checkpoint memory)
 - [ ] Add more practical tools (`read_pdf`, `search_web`, ...)
 - [ ] Human-approval mode (confirm before writing/deleting files)

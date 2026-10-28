@@ -7,15 +7,16 @@
 
 from __future__ import annotations
 
+import json
 import time
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import llm
-from .agent import run_agent
+from .agent import run_agent, run_agent_stream
 from .config import DEEPSEEK_API_KEY, DEEPSEEK_MODEL, STATIC_DIR
 from .recorder import make_recorder
 from .tools import TOOL_SCHEMAS
@@ -68,6 +69,44 @@ def chat(payload: ChatRequest) -> dict:
     except Exception as exc:  # noqa: BLE001
         print(f"[recorder] 记录失败：{exc}")
     return result
+
+
+@app.post("/api/chat/stream")
+def chat_stream(payload: ChatRequest):
+    """流式对话：SSE 推送工具调用过程与回答增量。"""
+    started = time.perf_counter()
+
+    def event_stream():
+        answer = ""
+        steps: list[dict] = []
+        tokens = None
+
+        def send(event: dict) -> str:
+            return f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
+
+        try:
+            for event in run_agent_stream(payload.message, payload.history):
+                if event.get("type") == "done":
+                    answer = event.get("answer") or ""
+                    steps = event.get("steps") or []
+                    tokens = event.get("tokens")
+                yield send(event)
+        except ValueError as exc:
+            yield send({"type": "error", "detail": str(exc)})
+        except llm.LLMError as exc:
+            yield send({"type": "error", "detail": str(exc)})
+        else:
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            try:  # 记录失败不影响对话本身
+                recorder.record(payload.message, answer, steps, tokens, latency_ms)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[recorder] 记录失败：{exc}")
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/logs")

@@ -400,6 +400,48 @@ body {
   font-size: 12px;
 }
 
+/* 流式执行时工具进度（随 SSE 实时更新） */
+.bubble .progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.bubble .progress:empty {
+  display: none;
+}
+
+.run-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 12px;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.run-step.ok {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.run-step.fail {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.run-step .run-index {
+  font-weight: 700;
+  opacity: 0.7;
+}
+
 @media (max-width: 860px) {
   .layout {
     flex-direction: column;
