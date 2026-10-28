@@ -16,7 +16,9 @@ A hand-written **AI Agent** mini-project: the LLM decides on its own when to che
 - 🗂️ **Call logging**: every conversation and tool call is persisted to MySQL (`agent_runs` / `tool_calls`); the UI shows a "Recent runs" panel. Without a database it falls back to local JSONL, so tests and demos never break.
 - ✅ **Testable**: tests run without a real model or network; GitHub Actions runs them automatically
 
-![Screenshot](docs/screenshots/chat.png)
+| Tool-call trace | API docs (Swagger UI) |
+|---|---|
+| ![Chat UI](docs/screenshots/chat.png) | ![API docs](docs/screenshots/api.png) |
 
 ## Quick start
 

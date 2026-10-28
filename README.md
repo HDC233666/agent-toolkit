@@ -17,7 +17,9 @@
 - 🗂️ **调用记录**：每次对话与工具调用落库 MySQL（`agent_runs` / `tool_calls` 两张表），前端展示「最近记录」；没配数据库时自动降级为本地 JSONL，测试照样跑
 - ✅ **可测试**：不依赖真实模型和网络也能跑测试，GitHub Actions 自动跑
 
-![界面截图](docs/screenshots/chat.png)
+| 工具调用过程 | API 文档（Swagger UI） |
+|---|---|
+| ![对话界面](docs/screenshots/chat.png) | ![API 文档](docs/screenshots/api.png) |
 
 ## 快速开始
 
