@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent 工具调用框架 · 李东泉</title>
+<meta name="description" content="基于 Function Calling 的 Agent 框架：9 个工具、并行调用、写文件人工审批、MCP 接入，调用链路可追溯。" />
+<style>
+  :root {
+    --bg: #0a1018;
+    --panel: #111c2a;
+    --panel-2: #16263a;
+    --line: #22364d;
+    --text: #e6f1ff;
+    --muted: #8fa8c7;
+    --brand: #22d3ee;
+    --brand-2: #6366f1;
+    --ok: #34d399;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: radial-gradient(1100px 560px at 12% -8%, #0f3b4a 0%, transparent 60%),
+                radial-gradient(900px 520px at 92% 0%, #1e2352 0%, transparent 58%),
+                var(--bg);
+    color: var(--text);
+    font: 16px/1.7 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 56px 24px 80px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px;
+    color: var(--muted); font-size: 13px; background: rgba(255,255,255,.02);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 12px var(--ok); }
+  h1 { font-size: 40px; line-height: 1.25; margin: 20px 0 12px; letter-spacing: -.5px; }
+  h1 span { background: linear-gradient(90deg, #22d3ee, #818cf8); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { color: var(--muted); font-size: 17px; max-width: 740px; margin: 0 0 28px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 40px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 20px; border-radius: 12px; text-decoration: none;
+    font-weight: 600; font-size: 15px; border: 1px solid transparent;
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-primary { background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: #04121a; box-shadow: 0 10px 30px rgba(34,211,238,.22); }
+  .btn-ghost { border-color: var(--line); color: var(--text); background: rgba(255,255,255,.02); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 40px; }
+  .card { background: linear-gradient(180deg, var(--panel), var(--panel-2)); border: 1px solid var(--line); border-radius: 14px; padding: 18px 18px 16px; }
+  .card .k { color: var(--muted); font-size: 13px; }
+  .card .v { font-size: 26px; font-weight: 700; margin-top: 6px; letter-spacing: -.5px; }
+  .card .v small { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 4px; }
+  h2 { font-size: 18px; margin: 36px 0 14px; padding-left: 10px; border-left: 3px solid var(--brand); }
+  ul { margin: 0; padding-left: 20px; color: var(--muted); }
+  li { margin: 6px 0; }
+  li b { color: var(--text); font-weight: 600; }
+  code { background: rgba(34,211,238,.10); border: 1px solid rgba(34,211,238,.22); padding: 1px 6px; border-radius: 6px; font-size: 13.5px; color: #bdeeff; }
+  .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .tag { font-size: 13px; color: #b8f2ff; background: rgba(34,211,238,.09); border: 1px solid rgba(34,211,238,.26); padding: 4px 10px; border-radius: 8px; }
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 10px 0 0; color: var(--muted); font-size: 14px; }
+  .flow i { font-style: normal; color: #5f7794; }
+  .flow span { border: 1px solid var(--line); background: rgba(255,255,255,.02); padding: 6px 10px; border-radius: 8px; color: var(--text); }
+  .foot { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 8px 20px; }
+  .foot a { color: #7ee7f7; text-decoration: none; }
+  @media (max-width: 560px) { h1 { font-size: 30px; } .wrap { padding: 36px 18px 60px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="badge"><span class="dot"></span> 演示在线 · 单人项目 · 2026.10</div>
+  <h1>Agent <span>工具调用框架</span></h1>
+  <p class="lead">
+    基于 Function Calling 的 Agent 框架：模型自主选择并执行工具，完成「查时间 → 计算 → 写文件 → 读回校验」这类多步任务。
+    内置 9 个工具（含只读 SQL 与 MCP 外部工具），支持同轮并行调用、写文件前人工审批、最大步数防死循环。
+  </p>
+
+  <div class="actions">
+    <a class="btn btn-primary" href="http://8.137.173.141:8011/?k=demo2026" target="_blank" rel="noreferrer">▶ 打开在线演示</a>
+    <a class="btn btn-ghost" href="https://github.com/HDC233666/agent-toolkit" target="_blank" rel="noreferrer">查看源码</a>
+    <a class="btn btn-ghost" href="https://github.com/HDC233666/agent-toolkit/blob/main/docs/ARCHITECTURE.md" target="_blank" rel="noreferrer">架构图</a>
+    <a class="btn btn-ghost" href="https://github.com/HDC233666/agent-toolkit/blob/main/docs/PROJECT.md" target="_blank" rel="noreferrer">一页纸说明</a>
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="k">内置工具</div><div class="v">9 <small>含只读 SQL + MCP</small></div></div>
+    <div class="card"><div class="k">同轮并行 tool_calls</div><div class="v">4 <small>线程池并发上限</small></div></div>
+    <div class="card"><div class="k">写文件人工审批</div><div class="v">120<small>s 超时自动拒绝</small></div></div>
+    <div class="card"><div class="k">单元测试</div><div class="v">57 <small>pytest · CI 全绿</small></div></div>
+    <div class="card"><div class="k">多步任务</div><div class="v">4 <small>步工具链一次跑通</small></div></div>
+    <div class="card"><div class="k">调用记录</div><div class="v">MySQL <small>agent_runs / tool_calls</small></div></div>
+  </div>
+
+  <h2>循环长这样</h2>
+  <div class="flow">
+    <span>用户提问</span><i>→</i><span>模型决策（tool_calls）</span><i>→</i><span>执行工具</span><i>→</i><span>结果回灌</span><i>→</i><span>再决策</span><i>→</i><span>生成回答</span>
+  </div>
+
+  <h2>做了什么</h2>
+  <ul>
+    <li><b>工具层：</b><code>calculator</code>（AST 白名单，不用 eval）、<code>now</code>、<code>list_files</code>、<code>read_file</code>、<code>write_file</code>（限制在沙箱目录、拦截路径穿越）、<code>http_get</code>、<code>sql_query</code>（只读语句白名单）、以及两个 MCP 工具。</li>
+    <li><b>安全：</b>写文件前必须人工审批——后端通过 SSE 把审批卡片推给前端，用户点「允许执行 / 拒绝」，超时 120 秒视为拒绝；工具异常以结构化 JSON 回灌，模型可自行修正重试。</li>
+    <li><b>MCP：</b>自己实现 stdio JSON-RPC 客户端（initialize / tools/list / tools/call / ping），启动外部 MCP 服务器并把它的工具注入 Agent 工具表。</li>
+    <li><b>可观测：</b>每次对话与工具调用落 MySQL（<code>agent_runs</code> / <code>tool_calls</code>），前端可查历史与运行指标；无数据库时降级 JSONL，保证演示可跑。</li>
+  </ul>
+
+  <h2>技术栈</h2>
+  <div class="tags">
+    <span class="tag">Python 3.13</span><span class="tag">FastAPI</span><span class="tag">Function Calling</span>
+    <span class="tag">DeepSeek</span><span class="tag">MCP / JSON-RPC</span><span class="tag">SSE</span>
+    <span class="tag">MySQL</span><span class="tag">ThreadPool</span><span class="tag">pytest</span>
+    <span class="tag">Docker Compose</span><span class="tag">GitHub Actions</span><span class="tag">阿里云 ECS</span>
+  </div>
+
+  <h2>另一个项目</h2>
+  <ul>
+    <li><b>RAG 知识库问答系统：</b>混合召回 + RRF + LLM 重排，hit@1 0.75，<a href="https://hdc233666.github.io/rag-knowledge-base/" style="color:#7ee7f7">落地页</a> · <a href="https://github.com/HDC233666/rag-knowledge-base" style="color:#7ee7f7">源码</a></li>
+  </ul>
+
+  <div class="foot">
+    <span>演示口令：demo2026 · 每日预算 300 次</span>
+    <span>写文件会弹审批卡片，直接点「允许执行」即可</span>
+    <a href="https://github.com/HDC233666/agent-toolkit">github.com/HDC233666/agent-toolkit</a>
+  </div>
+</div>
+</body>
+</html>
