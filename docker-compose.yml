@@ -1,0 +1,64 @@
+# 一键起服务：Agent 应用 + （可选）MySQL 调用记录
+#
+# 最常用：
+#   docker compose up -d --build                  # 只起应用，调用记录写 data/logs.jsonl
+#   docker compose --profile mysql up -d          # 连 MySQL，调用记录进 agent_runs / tool_calls
+#   docker compose logs -f app                    # 看日志
+#   docker compose down                           # 停掉（--volumes 连数据卷一起删）
+
+services:
+  app:
+    build: .
+    image: agent-toolkit:latest
+    container_name: agent-toolkit
+    ports:
+      - "8011:8000"
+    env_file:
+      - .env
+    environment:
+      AGENT_DB_HOST: ${AGENT_DB_HOST:-}
+      AGENT_DB_PORT: ${AGENT_DB_PORT:-3306}
+      AGENT_DB_USER: ${AGENT_DB_USER:-}
+      AGENT_DB_PASSWORD: ${AGENT_DB_PASSWORD:-}
+      AGENT_DB_NAME: ${AGENT_DB_NAME:-agent_toolkit}
+      SQL_DB_HOST: ${SQL_DB_HOST:-}
+      SQL_DB_PORT: ${SQL_DB_PORT:-3306}
+      SQL_DB_USER: ${SQL_DB_USER:-}
+      SQL_DB_PASSWORD: ${SQL_DB_PASSWORD:-}
+      SQL_DB_NAME: ${SQL_DB_NAME:-rag_kb}
+    volumes:
+      # data/workspace 是文件沙箱；挂出来方便在宿主机查看模型写了什么
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health')\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    container_name: agent-mysql
+    profiles: ["mysql"]
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-agent_root_pw}
+      MYSQL_DATABASE: ${AGENT_DB_NAME:-agent_toolkit}
+      MYSQL_USER: ${AGENT_DB_USER:-agent}
+      MYSQL_PASSWORD: ${AGENT_DB_PASSWORD:-agent_pw}
+    ports:
+      - "3308:3306"          # 宿主机 3308，避免和本机 MySQL / RAG 的 3307 抢
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docs/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-agent_root_pw}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  mysql-data:

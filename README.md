@@ -55,6 +55,18 @@ python scripts/smoke.py
 
 想启用 MySQL 调用记录：在 `.env` 里填 `AGENT_DB_*`（建库 `agent_toolkit` 并授权，见「调用记录」一节）；不填时自动写入 `data/logs.jsonl`，不影响使用。
 
+不想配环境？一条命令：
+
+```bash
+cp .env.example .env      # 填 DEEPSEEK_API_KEY
+docker compose up -d --build
+# 打开 http://127.0.0.1:8011/docs
+```
+
+`docker compose --profile mysql up -d` 会顺带起 MySQL，把调用记录写进 `agent_runs` / `tool_calls`（建表脚本见 `docs/init.sql`）。
+
+架构图与设计取舍见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，一页纸项目说明见 [`docs/PROJECT.md`](docs/PROJECT.md)。
+
 ## 工作流程
 
 ```
@@ -187,11 +199,19 @@ agent-toolkit/
 │   ├── mcp_client.py  # MCP 客户端：stdio 子进程 + JSON-RPC 2.0
 │   ├── mcp_server.py  # 自带的 MCP 工具服务器（kb_search / kb_stats）
 │   ├── mcp_tools.py   # MCP 服务器管理：加载配置、合并 mcp__ 工具、状态上报
+│   ├── approvals.py   # 人工审批（写文件前确认，超时按拒绝）
+│   ├── metrics.py     # 计数 / 延迟 / Prometheus 文本指标
+│   ├── guard.py       # 演示访问保护（口令 + 每日额度）
 │   └── config.py      # 环境变量配置（含数据库连接）
 ├── static/            # 聊天界面（原生 HTML/CSS/JS，无构建步骤）
 ├── data/workspace/    # 文件工具沙箱（Agent 生成的文件写在这里）
 ├── data/logs.jsonl    # 未配数据库时的调用记录降级文件
 ├── data/mcp_servers.json  # MCP 工具服务器清单
+├── docs/
+│   ├── ARCHITECTURE.md    # 架构图（Mermaid）+ 时序图 + 设计取舍
+│   ├── PROJECT.md         # 一页纸项目说明
+│   ├── init.sql           # MySQL 建表脚本（compose 自动执行）
+│   └── screenshots/       # README 配图与演示 GIF
 ├── tests/             # 工具 / Agent / API 三层测试
 ├── scripts/smoke.py   # 真实模型冒烟测试
 └── .github/workflows/ci.yml
