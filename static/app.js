@@ -1,3 +1,26 @@
+/* 演示口令：遇到 401 时弹窗输入口令，解锁后自动刷新；用户取消过一次就不再骚扰 */
+(function () {
+  const origFetch = window.fetch.bind(window);
+  let prompted = sessionStorage.getItem("dsh_unlock_prompted") === "1";
+  window.fetch = async function (url, opts) {
+    const res = await origFetch(url, opts);
+    if (res.status === 401 && !String(url).includes("/api/unlock") && !prompted) {
+      prompted = true;
+      sessionStorage.setItem("dsh_unlock_prompted", "1");
+      const pw = window.prompt("这是演示站点，请输入访问口令");
+      if (pw) {
+        const r = await origFetch("/api/unlock", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: pw }),
+        });
+        if (r.ok) location.reload();
+        else alert("口令不对，请刷新后重新输入");
+      }
+    }
+    return res;
+  };
+})();
 const $ = (selector) => document.querySelector(selector);
 
 const chatList = $("#chat-list");
@@ -380,3 +403,4 @@ document.querySelectorAll("#examples li").forEach((item) => {
 
 loadTools();
 loadLogs();
+

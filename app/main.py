@@ -12,12 +12,12 @@ import re
 import time
 from collections import deque
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import llm, metrics
+from . import guard, llm, metrics
 from .agent import _all_schemas, run_agent, run_agent_stream
 from .approvals import registry
 from .config import DEEPSEEK_API_KEY, DEEPSEEK_MODEL, RATE_LIMIT_PER_MIN, STATIC_DIR
@@ -54,6 +54,49 @@ async def rate_limit(request: Request, call_next):
     return response
 
 
+# 访问保护（可选）：设置了 DEMO_PASSWORD 后，除健康检查/解锁/静态资源外都要先输入口令
+_PUBLIC_PATHS = ("/", "/docs", "/redoc", "/openapi.json")
+
+
+@app.middleware("http")
+async def access_guard(request: Request, call_next):
+    path = request.url.path
+    if (
+        path.startswith("/static")
+        or path in _PUBLIC_PATHS
+        or path == "/api/health"
+        or (path == "/api/unlock" and request.method == "POST")
+    ):
+        return await call_next(request)
+    if not guard.is_unlocked(request):
+        return JSONResponse(
+            {"detail": "这是演示站点，请输入访问口令后使用（地址后加 ?k=口令 可自动解锁）"},
+            status_code=401,
+        )
+    return await call_next(request)
+
+
+class UnlockRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=200)
+
+
+@app.post("/api/unlock")
+def unlock(payload: UnlockRequest, response: Response) -> dict:
+    """校验口令并种 cookie（7 天）。未开启口令时直接返回成功。"""
+    if not guard.auth_enabled():
+        return {"ok": True, "enabled": False}
+    if payload.password != guard.PASSWORD:
+        raise HTTPException(status_code=403, detail="口令不对")
+    response.set_cookie(
+        guard.COOKIE_NAME,
+        guard._digest(payload.password),
+        httponly=True,
+        samesite="lax",
+        max_age=7 * 24 * 3600,
+    )
+    return {"ok": True, "enabled": True}
+
+
 class ApprovalRequest(BaseModel):
     approval_id: str = Field(min_length=4, max_length=64)
     approve: bool
@@ -71,7 +114,13 @@ def index() -> FileResponse:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "model": DEEPSEEK_MODEL, "has_key": bool(DEEPSEEK_API_KEY)}
+    return {
+        "ok": True,
+        "model": DEEPSEEK_MODEL,
+        "has_key": bool(DEEPSEEK_API_KEY),
+        "auth": guard.auth_enabled(),
+        "budget_left": guard.budget_left(),
+    }
 
 
 @app.get("/api/tools")
@@ -93,6 +142,8 @@ def mcp_status() -> dict:
 
 @app.post("/api/chat")
 def chat(payload: ChatRequest) -> dict:
+    if not guard.check_budget():
+        raise HTTPException(status_code=429, detail="今日演示额度已用完，明天再来试吧")
     started = time.perf_counter()
     metrics.incr("agent_chat_total")
     try:
@@ -117,6 +168,8 @@ def chat(payload: ChatRequest) -> dict:
 @app.post("/api/chat/stream")
 def chat_stream(payload: ChatRequest):
     """流式对话：SSE 推送工具调用过程与回答增量。"""
+    if not guard.check_budget():
+        raise HTTPException(status_code=429, detail="今日演示额度已用完，明天再来试吧")
     started = time.perf_counter()
     metrics.incr("agent_stream_total")
 

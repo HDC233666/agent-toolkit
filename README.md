@@ -2,6 +2,8 @@
 
 > [English version](README.en.md)
 
+![演示：多步工具调用 + 人工审批](docs/screenshots/demo.gif)
+
 一个从零手写的 **AI Agent** 小项目：让大模型自己决定什么时候查时间、什么时候算数、什么时候读写文件、什么时候抓网页、什么时候查数据库，并把每一步工具调用都展示出来。
 
 > 求职向项目 2/2：项目 1 是 [RAG 知识库问答](../rag-knowledge-base)，两个项目覆盖「检索增强」和「工具调用」两块大模型应用核心能力。
@@ -273,3 +275,4 @@ python -m pytest -q
 ## License
 
 [MIT](LICENSE)
+

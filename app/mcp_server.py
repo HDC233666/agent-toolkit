@@ -194,6 +194,14 @@ def handle(message: dict) -> dict | None:
 
 def main() -> None:
     """从 stdin 逐行读 JSON-RPC 请求，把响应写到 stdout（一行一个 JSON）。"""
+    # Windows 下 stdio 默认是 GBK，必须显式改成 UTF-8，否则中文描述会乱码
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except Exception:  # noqa: BLE001
+                pass
     stdin = sys.stdin
     stdout = sys.stdout
     for line in stdin:
