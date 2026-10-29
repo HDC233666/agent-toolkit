@@ -21,6 +21,25 @@
     return res;
   };
 })();
+
+/* 支持 ?k=口令 直接解锁（分享给面试官时用：http://ip:8010/?k=demo2026） */
+(function () {
+  const params = new URLSearchParams(location.search);
+  const token = params.get("k");
+  if (!token) return;
+  fetch("/api/unlock", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: token }),
+  })
+    .then((res) => {
+      if (!res.ok) return;
+      params.delete("k");
+      const qs = params.toString();
+      location.replace(location.pathname + (qs ? "?" + qs : ""));
+    })
+    .catch(() => {});
+})();
 const $ = (selector) => document.querySelector(selector);
 
 const chatList = $("#chat-list");
