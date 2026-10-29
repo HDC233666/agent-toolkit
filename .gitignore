@@ -22,3 +22,6 @@ data/logs.jsonl
 .vscode/
 .DS_Store
 Thumbs.db
+
+# 打包上传临时文件
+*.tar.gz
