@@ -1,10 +1,32 @@
-/* 演示口令：遇到 401 时弹窗输入口令，解锁后自动刷新；用户取消过一次就不再骚扰 */
+/* 演示口令：支持 ?k=口令 自动解锁；遇到 401 时弹窗输入口令，解锁后自动刷新。
+   注意：?k= 解锁期间不要弹口令框（否则会和自动解锁抢跑）。 */
 (function () {
   const origFetch = window.fetch.bind(window);
+  let unlockedByToken = false;
+  const token = new URLSearchParams(location.search).get("k");
+  if (token) {
+    unlockedByToken = true;
+    origFetch("/api/unlock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: token }),
+    })
+      .then((res) => {
+        if (!res.ok) return false;
+        const params = new URLSearchParams(location.search);
+        params.delete("k");
+        const qs = params.toString();
+        location.replace(location.pathname + (qs ? "?" + qs : ""));
+        return true;
+      })
+      .finally(() => {
+        setTimeout(() => { unlockedByToken = false; }, 3000);
+      });
+  }
   let prompted = sessionStorage.getItem("dsh_unlock_prompted") === "1";
   window.fetch = async function (url, opts) {
     const res = await origFetch(url, opts);
-    if (res.status === 401 && !String(url).includes("/api/unlock") && !prompted) {
+    if (res.status === 401 && !String(url).includes("/api/unlock") && !prompted && !unlockedByToken) {
       prompted = true;
       sessionStorage.setItem("dsh_unlock_prompted", "1");
       const pw = window.prompt("这是演示站点，请输入访问口令");
@@ -16,30 +38,14 @@
         });
         if (r.ok) location.reload();
         else alert("口令不对，请刷新后重新输入");
+      } else {
+        sessionStorage.removeItem("dsh_unlock_prompted");
       }
     }
     return res;
   };
 })();
 
-/* 支持 ?k=口令 直接解锁（分享给面试官时用：http://ip:8010/?k=demo2026） */
-(function () {
-  const params = new URLSearchParams(location.search);
-  const token = params.get("k");
-  if (!token) return;
-  fetch("/api/unlock", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password: token }),
-  })
-    .then((res) => {
-      if (!res.ok) return;
-      params.delete("k");
-      const qs = params.toString();
-      location.replace(location.pathname + (qs ? "?" + qs : ""));
-    })
-    .catch(() => {});
-})();
 const $ = (selector) => document.querySelector(selector);
 
 const chatList = $("#chat-list");
